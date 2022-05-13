@@ -1,0 +1,722 @@
+---
+title: "CS03 - Vaping Behaviors in American Youth"
+author: "Angela Chapman, Kareema Kilani, and Joshua Suh"
+output: html_document
+---
+
+## Introduction
+
+Upon first hearing the term, “vaping epidemic”, one would be surprised to find out that it is not at all related to virology. However, it perfectly characterizes the alarming scale at which nicotine and tobacco products are distributed to teenagers. Vapes and e-cigarettes are advertised as a “safe alternative to cigarettes,” and their supposed function is to help heavy smokers cut their smoking habits. Studies show that vapes and e-cigs have a promising effect as a replacement nicotine delivery device, and its less carcinogenic composition would make it a lot safer than smoking conventional cigarettes. However, their less threatening marketing, ease of use and their flash-drive-like appearance made vapes a perfect device for a curious teenager who wanted to smoke. All of the stigma around cigarettes was destroyed, as the marketing could be interpreted as the vape being the “anti-cigarette.” And without the pungent cigarette smell and the need to burn anything, vaping proved to be harder to spot. Furthermore, with companies like JUUL introducing sweet, fruity flavors, the vaping trend quickly spread among adolescents all over the U.S.. Even if the vape is less carcinogenic than a traditional cigarette, introducing nicotine to teenagers in a form of a pleasurable pastime would only lead to a dependence on nicotine. 
+
+We will explore the National Youth Tobacco Surveys (NYTS) from the CDC (https://www.cdc.gov/tobacco/data_statistics/surveys/nyts/index.htm) that were taken by adolescents from age 9 to 18(+) during the years 2015 through 2019, and try to find a trend that could help explain the rampant growth of tobacco products among youths.
+
+To extend our analysis we decided to look look at tabacco flavors across gender for teenagers since they have been a target audience for the most popular e-cigarette company, such as JUUL.This is meaningful as targeted marketing towards teens can lead to a trying cigarettes. FDA states, "In particular, evidence shows that youth exposure to nicotine can adversely affect the developing adolescent brain and that, compared with non-users, youth who use e-cigarettes are more likely to try conventional cigarettes in the future." Have these flavors truly helped attract teenagers into vaping? If so, what flavors? And do these results differ from gender to gender?
+
+### Load packages
+
+```{r load-packages, message=FALSE}
+library(tidyverse)
+library(tidymodels)
+library(broom)
+library(viridis) 
+library(scales)
+library(srvyr)
+```
+
+## Question
+
+There has been studies like those from the Truth Initiative and UCSF that have speculated that past use of e-cigarettes may indicate further or current use of cigarettes/tobacco, especially in adolescents. This is called the gateway effect. What’s the probability that individuals who have tried e-cigarettes in the past are currently using tobacco-based products based on their age?
+
+## The Data
+ 
+### Data Import
+ 
+We import the necessary data from the OCSdata library. 
+```{r, eval=FALSE}
+OCSdata::load_simpler_import("ocs-bp-vaping-case-study", outpath = getwd())
+```
+ 
+### Data Wrangling
+ 
+For this case study, we are only concerned about data from 2015-2019. 
+```{r}
+# read in CSVs
+nyts_data <- list.files("data/simpler_import/", 
+                        pattern = "*.csv", 
+                        full.names = TRUE) |>
+  map(~ read_csv(.))
+# get names by extracting the year from their files.
+nyts_data_names <- list.files("data/simpler_import/",
+                              pattern = "*.csv") |>
+  str_extract("nyts201[5-9]")
+ 
+# apply the names to the read-in csv.
+names(nyts_data) <- nyts_data_names
+```
+Now, the data is in a list of 5 tibbles, ranging from nyts2015, to nyts2019.
+ 
+These data seem a little disorganized with question numbers as labels for the variables. 
+We'll use context clues from the survey to replace these labels to something more easily understood.
+```{r}
+# 2015
+nyts_data[["nyts2015"]] <- nyts_data[["nyts2015"]] |>
+  rename(Age = Qn1,
+         Sex = Qn2,
+         Grade = Qn3)
+```
+ 
+Since 2016-2018 have the same survey layout, we can make a function to apply to all 3 years at once. 
+```{r}
+update_survey <- function(dataset) { 
+  dataset |>
+    rename(Age = Q1,
+           Sex = Q2,
+           Grade = Q3,
+           menthol = Q50A,
+           clove_spice = Q50B,
+           fruit = Q50C,
+           chocolate = Q50D,
+           alcoholic_drink = Q50E,
+           candy_dessert_sweets = Q50F,
+           other = Q50G)
+}
+```
+ 
+```{r}
+#Using map_at, we apply the update_survey function to all years except 2015 and 2019.
+nyts_data <- nyts_data |> 
+  map_at(vars(-nyts2015, -nyts2019), update_survey)
+```
+ 
+2019's questionnaire was expanded upon from previous years, so the question number labels are different than the other years. We would need a special clean-up code for 2019 for this reason. 
+```{r}
+nyts_data[["nyts2019"]] <- nyts_data[["nyts2019"]] |>
+  rename(brand_ecig = Q40,
+         Age = Q1,
+         Sex = Q2,
+         Grade = Q3,
+         menthol = Q62A,
+         clove_spice = Q62B,
+         fruit = Q62C,
+         chocolate = Q62D,
+         alcoholic_drink = Q62E,
+         candy_dessert_sweets = Q62F,
+         other = Q62G)
+```
+ 
+Upon inspecting the extracted data, we can see that most of the answers are given by numbers ranging from 1 to x. This is because the answer directly reflects the answer's position in the list of all possible choices. 
+ 
+```{r}
+update_values <- function(dataset){
+  dataset |>
+    #add 8 to all Age values, because the lowest age is 9, and the lowest       value in the Age column is 1. Same with Grade, as 6th grade is the lowest grade, so we add 5 to the variable.  
+    mutate(Age = as.numeric(Age) + 8,
+           Grade = as.numeric(Grade) + 5) |>
+    #Change to factors because these are not continuous variables
+    mutate(Age = as.factor(Age),
+           Grade = as.factor(Grade),
+           Sex = as.factor(Sex)) |>
+    #recoding Sex values to male and female
+    mutate(Sex = recode(Sex,
+                        `1` = "male",
+                        `2` = "female")) |>
+    mutate_all(~ replace(., . %in% c("*", "**"), NA)) |>
+    #19 is recoded as "over 18" and "13" in grade is recoded to "other"
+    mutate(Age = recode(Age, `19` = ">18"),
+           Grade = recode(Grade,
+                          `13` = "Ungraded/Other")) |>
+ 
+    #For every other variables regarding "Ever-" or "current-", we turn the answer values into either true or false depending on the number. 
+    mutate_at(vars(starts_with("E", ignore.case = FALSE),
+                   starts_with("C", ignore.case = FALSE)
+    ), list( ~ recode(., `1` = TRUE,
+                      `2` = FALSE,
+                      .default = NA,
+                      .missing = NA)))
+}
+ 
+```
+ 
+We will apply this update function to all the data.
+ 
+```{r}
+nyts_data <- map(nyts_data, update_values)
+```
+ 
+To aid in our EDA, we will make a function to count all the males in each dataset.
+```{r}
+# function to count how many males
+count_sex <- function(dataset){dataset |> 
+    filter(Sex=='male') |> 
+    count(Sex) |> 
+    pull(n)}
+```
+ 
+Similar to how we changed "E-" and "C-" variables' values, we will proceed to change the values for the flavor variables as well, spanning from "menthol" to "other."
+```{r}
+update_flavors <- function(dataset){
+  dataset |>
+    mutate_at(vars(menthol:other),
+              list(~ recode(.,
+                            `1` = TRUE,
+                            .default = FALSE,
+                            .missing = FALSE))) }
+ 
+#apply the function to every data except 2015.
+nyts_data  <- nyts_data  |> 
+  map_at(vars(-nyts2015), update_flavors)
+```
+ 
+For the 2019 surveys, there was a question about what brand of e-cigarettes that was used (Q40). So for this particular year, we will recode the factors into the corresponding company as listed in the questionnaire. 
+```{r}
+nyts_data[["nyts2019"]] <- nyts_data[["nyts2019"]] |>
+  mutate_all(~ replace(., . %in% c(".N", ".S", ".Z"), NA)) |>
+  mutate(psu = as.character(psu)) |>
+  mutate(brand_ecig = recode(brand_ecig,
+                             `1` = "Other", # levels 1,8 combined to `Other`
+                             `2` = "Blu",
+                             `3` = "JUUL",
+                             `4` = "Logic",
+                             `5` = "MarkTen",
+                             `6` = "NJOY",
+                             `7` = "Vuse",
+                             `8` = "Other"))
+```
+ 
+Now, to de-list the nyts_data, we will "unravel" the list by making a year column and putting every dataframe in the list in one single dataframe by the original dataframe's year. 
+```{r}
+nyts_data <- nyts_data |>
+  map_df(bind_rows, .id = "year") |>
+  mutate(year = as.numeric(str_remove(year, "nyts"))) # clean-up year column
+ 
+ 
+```
+ 
+To help in our EDA, we will create 4 new variables, two of them tracking the the sum of "True"s in the E- and C- variables for each student, and another two to track if the two previous values are >0 or not.
+```{r}
+nyts_data <- nyts_data %>%
+  
+  #create two variables to track the sum of all E- and C- variable 
+  mutate(tobacco_sum_ever = rowSums(select(., starts_with("E", 
+                                    ignore.case = FALSE)), na.rm = TRUE),
+         tobacco_sum_current = rowSums(select(., starts_with("C", 
+                                    ignore.case = FALSE)), na.rm = TRUE))  |>
+  
+  #create two variables that track if the sums or 0 or not.
+  mutate(tobacco_ever = case_when(tobacco_sum_ever > 0 ~ TRUE,
+                                  tobacco_sum_ever == 0 ~ FALSE),
+         tobacco_current = case_when(tobacco_sum_current > 0 ~ TRUE,
+                                     tobacco_sum_current == 0 ~ FALSE))
+```
+ 
+We create more specific variables for further analysis.
+```{r}
+nyts_data <- nyts_data %>% 
+  #ecig_sum_ever, ecig_sum_current only take account of electric cigarette usage
+  #non_ecig_sum_ever and non_ecig_sum_current track the other variables that aren't ecig related.
+  
+  mutate(ecig_sum_ever = rowSums(select(., EELCIGT), na.rm = TRUE),
+         ecig_sum_current = rowSums(select(., CELCIGT), na.rm = TRUE),
+         non_ecig_sum_ever = rowSums(select(., starts_with("E",  ignore.case = FALSE), 
+                                            -EELCIGT), na.rm = TRUE),
+         non_ecig_sum_current = rowSums(select(., starts_with("C", ignore.case = FALSE), 
+                                               -CELCIGT), na.rm = TRUE)) |>
+  
+  #ecig_ever to non_ecig_current serve the same function as tobacco_ever and tobacco_current.
+  mutate(ecig_ever = case_when(ecig_sum_ever > 0 ~ TRUE,
+                              ecig_sum_ever == 0 ~ FALSE),
+         ecig_current = case_when(ecig_sum_current > 0 ~ TRUE,
+                                  ecig_sum_current == 0 ~ FALSE),
+         non_ecig_ever = case_when(non_ecig_sum_ever > 0 ~ TRUE,
+                                   non_ecig_sum_ever == 0 ~ FALSE),
+         non_ecig_current = case_when(non_ecig_sum_current > 0 ~ TRUE,
+                                      non_ecig_sum_current == 0 ~ FALSE))
+```
+ 
+ 
+With all the variables created above, we can make some assumptions based on whether or not they have either ever have used or currently using tobacco products.
+ 
+```{r}
+nyts_data <- nyts_data |>
+             mutate(ecig_only_ever = case_when(ecig_ever == TRUE &
+                                           non_ecig_ever == FALSE &
+                                            ecig_current == FALSE &
+                                        non_ecig_current == FALSE ~ TRUE,
+                                                             TRUE ~ FALSE),
+              ecig_only_current = case_when(ecig_current == TRUE &
+                                           non_ecig_ever == FALSE &
+                                        non_ecig_current == FALSE ~ TRUE,
+                                                            TRUE ~ FALSE),
+            non_ecig_only_ever = case_when(non_ecig_ever == TRUE &
+                                               ecig_ever == FALSE &
+                                            ecig_current == FALSE &
+                                        non_ecig_current == FALSE ~ TRUE,
+                                                            TRUE ~ FALSE),
+      non_ecig_only_current = case_when(non_ecig_current == TRUE &
+                                               ecig_ever == FALSE &
+                                            ecig_current == FALSE ~ TRUE,
+                                                            TRUE ~ FALSE),
+                        no_use = case_when(non_ecig_ever == FALSE &
+                                               ecig_ever == FALSE &
+                                            ecig_current == FALSE &
+                                        non_ecig_current == FALSE ~ TRUE,
+                                                            TRUE ~ FALSE)) %>%
+                 mutate(Group = case_when(ecig_only_ever == TRUE |
+                                       ecig_only_current == TRUE ~ "Only e-cigarettes",
+                                      non_ecig_only_ever == TRUE |
+                                   non_ecig_only_current == TRUE ~ "Only other products",
+                                                  no_use == TRUE ~ "Neither",
+                                          ecig_only_ever == FALSE &
+                                       ecig_only_current == FALSE &
+                                      non_ecig_only_ever == FALSE &
+                                   non_ecig_only_current == FALSE &
+                                                  no_use == FALSE ~ "Combination of products"))
+```
+ 
+To make taking proportions easier, we will also add the sample size for that year in each row. 
+ 
+```{r}
+nyts_data <- nyts_data |> 
+  add_count(year)
+```
+ 
+And finally, we save this data.
+ 
+```{r}
+save(nyts_data, file="data/wrangled/wrangled_data_vaping.rda")
+```
+
+### Exploratory Data Analysis
+
+#### EDA Question I
+
+1. How has tobacco and e-cigarette/vaping use by American youths per age overtime?
+
+This plot shows the e-cigarette usages for each age between 2015 to 2019, except for age 9 as there was not data from 2015 to 2018. 
+
+```{r}
+nyts_data |>
+  filter(!is.na(Age)) |>
+  group_by(year, Age) |>
+  summarize("Current \n (any past-30-day use)" = (mean(tobacco_current, na.rm = TRUE) * 100)) |>
+  
+  pivot_longer(cols = -c(year, Age), 
+               names_to = "User", 
+               values_to = "Percentage of students") |>
+  
+  ggplot(aes(x = year, y = `Percentage of students`, color = Age)) +
+  geom_line(aes(linetype = User)) +
+  geom_point(show.legend = FALSE, size = 2) +
+
+  # this allows us to choose what type of line we want for each line
+  scale_linetype_manual(values = c(1, 2), 
+                        breaks = c("Current \n (any past-30-day use)")) +
+  
+  # this allows us to specify how the y-axis should appear
+  scale_y_continuous(breaks = seq(0, 60, by = 10),
+                     labels = seq(0, 60, by = 10),
+                     limits = c(0, 60)) +
+  
+  # this adjusts the background style of the plot
+  theme_linedraw() +
+  labs(title = "How has current tobacco use per age varied over the years ?",
+       y = "% of students") +
+  
+  # this moves the legend to the bottom of the plot and removes the x axis title
+  theme(axis.title.x = element_blank(),
+        text = element_text(size = 12),
+        plot.title.position = "plot")
+```
+
+We see similar trends at different percentages with all ages except 10 years old as they had high percentages for all years except 2019, there was as well as sharp decline from 2018 to 2019. Most age groups are plotted at lower percentages then each line steadily grows for every age until 18 plus. For Age 9, the singular point in 2019 shows a very large percent, even higher than 18 plus, near the 50 percent range. Learning how that spfiec data was collected may explain more about the one point.
+
+
+This plot shows the e-cigarette usages for each age between 2015 to 2019.
+
+```{r}
+nyts_data |>
+  filter(!is.na(Age)) |>
+  group_by(year, Age) |>
+  summarize("Current \n (any past-30-day use)" = (mean(ecig_current, na.rm = TRUE) * 100)) |>
+  
+  pivot_longer(cols = -c(year, Age), 
+               names_to = "User", 
+               values_to = "Percentage of students") |>
+  
+  ggplot(aes(x = year, y = `Percentage of students`, color = Age)) +
+  geom_line(aes(linetype = User)) +
+  geom_point(show.legend = FALSE, size = 2) +
+
+  # this allows us to choose what type of line we want for each line
+  scale_linetype_manual(values = c(1, 2), 
+                        breaks = c("Current \n (any past-30-day use)")) +
+  
+  # this allows us to specify how the y-axis should appear
+  scale_y_continuous(breaks = seq(0, 60, by = 10),
+                     labels = seq(0, 60, by = 10),
+                     limits = c(0, 60)) +
+  
+  # this adjusts the background style of the plot
+  theme_linedraw() +
+  labs(title = "How has current e-cigarette usage per age varied over the years?",
+       y = "% of students") +
+  
+  # this moves the legend to the bottom of the plot and removes the x axis title
+  theme(axis.title.x = element_blank(),
+        text = element_text(size = 12),
+        plot.title.position = "plot")
+
+```
+
+Between the age 11 to 18 plus, we see a similar trends throughout the years but a increase after 2017 until 2019. 
+
+The data from age 9 and 10 seems questionable as they show extreme percentages and trends that don't align with the other ages, as this could be true and real data then Age 9 starts with a whopping 40 to 45 percent and increases until 2017 following a decline until 2019. Age 10 starts roughly around the same age group as 17 and 18 then increase heavily from 2016 to 2017 following a extreme decline from 2017 to 2019, ending in the same age groups as 11 and 12.
+
+#### EDA Question II
+
+2. How does e-cigarette current and ever compare to tobacco current and ever between males and females?**
+
+```{r}
+
+diff_nyts_data <- nyts_data %>% 
+  filter(!is.na(Sex)) %>% 
+  select(Sex, year, ecig_ever, ecig_current, 
+         tobacco_ever, tobacco_current) %>% 
+  group_by(year, Sex) %>% 
+  summarize("E-Cig Ever \n (any lifetime use)" = (mean(ecig_ever, na.rm = TRUE) * 100),
+            "E-Cig Current \n (any past-30-day use)" = (mean(ecig_current, na.rm = TRUE) * 100),
+            "Tobacco Ever \n (any lifetime use)" = (mean(tobacco_ever, na.rm = TRUE) * 100),
+            "Tobacco Current \n (any past-30-day use)"  = (mean(tobacco_current, na.rm = TRUE) * 100)) %>% 
+  pivot_longer(., cols = -c(year, Sex), names_to = 'User',
+               values_to  = 'Percentage of students')
+
+diff_nyts_data %>% 
+  mutate(Smoking = case_when(
+    User == 'E-Cig Ever \n (any lifetime use)' ~ 'E-Cig',
+    User == 'E-Cig Current \n (any past-30-day use)' ~ 'E-Cig',
+    User == "Tobacco Ever \n (any lifetime use)" ~ 'Tobacco',
+    User == "Tobacco Current \n (any past-30-day use)" ~ 'Tobacco'
+  )) %>% 
+  mutate(History = case_when(
+    User == 'E-Cig Ever \n (any lifetime use)' ~ 'Ever',
+    User == 'E-Cig Current \n (any past-30-day use)' ~ 'Current',
+    User == "Tobacco Ever \n (any lifetime use)" ~ 'Ever',
+    User == "Tobacco Current \n (any past-30-day use)" ~ 'Current'
+  )) %>% 
+  ggplot(aes(x = year, y = `Percentage of students`, color = Sex)) +
+  geom_line(aes(linetype = History)) +
+  facet_wrap(~ Smoking)
+
+```
+We see similar trends for both genders, but the current usage of tobacco is slightly higher for both genders compared to e-cigarettes. We see varing pertanges for current and ever used with a decline until 2016 for all types. A decline continues for ever uages until 2017, however for current usages there isn't much change from 2016 to 2017. Post 2017, there is a increase for all types from 2017 to 2019.  
+
+#### EDA Question III
+
+3. Is there a relationship between specific tobacco flavors and age groups? 
+ 
+```{r}
+#3
+nyts_data1<-nyts_data |>
+  filter(year != 2015) |>
+  group_by(year, Age) |>
+  
+  #Only looking at high school ages
+  filter((Age %in% c(14:18)))|>
+  summarize(Menthol = (mean(menthol) * 100),
+            `Clove or Spice` = (mean(clove_spice) * 100),
+            Fruit = (mean(fruit) * 100),
+            Chocolate = (mean(chocolate) * 100),
+            `Alcoholic Drink` = (mean(alcoholic_drink) * 100),
+            `Candy/Desserts/Sweets` = (mean(candy_dessert_sweets) * 100),
+            Other = (mean(other) * 100))|>
+pivot_longer(cols = -c(year, Age), 
+               names_to = "Flavor",
+               values_to = "Percentage of students")
+ 
+ggplot(nyts_data1, aes(y = `Percentage of students`, x = Age, fill = reorder(Flavor, `Percentage of students`))) +
+   geom_bar(stat = "identity",
+           position = "dodge",
+           color = "black") +
+  scale_fill_viridis(discrete = TRUE) +
+  theme_linedraw() +
+  guides(fill = guide_legend("Flavor")) +
+  facet_wrap( ~ year)
+ 
+ 
+ 
+```
+
+Most ages and years following similar trends, especially within 2016, 2017, and 2018. The trend small usage with clove or spice, chocolate, alcoholic drink, and other types. For 2016, 2017, and 2018 we a increase between candy/desserts/sweets then menthol, and following the highest for all fruit.
+
+When it comes to 2019, there is similar percentages with menthol and fruit for ages 17 and 18. Especially for 18 where menthol is higher than fruit with a small percent however this is the only case where this occurs. 
+
+## Data Analysis
+
+In this data analysis, we will seek to answer our main question about whether the gateway effect (e-cigarettes/vaping being a pathway into smoking) does exists within particular age groups based on past history of e-cigarette use. In order to see whether there are recent effects, we looked at participants from 2019 who have tried e-cigarettes in the past (as indicated with "ecig_ever") and seeing the probability of these participants actively smoking tobacco given their age. For sake of our analysis, we divided the survey participants into three age groups: ages 9-12 being pre-teen, 13-17 being teen/adolescent, and 18 and over being adult. For these analyses, we use a variety of techniques ranging from chi-square and Cramer's V to logistic regression.
+
+
+### Should Current/Ever Tobacco and E-Cigarette Variables Act as Predictors?
+
+Before we start using the logistic regression models in the context of our main question, we want to have an idea of whether current/ever tobacco and e-cigarette use are associated with one another using the chi-square test and the extent to which these categorical variables are associated as determined by the Cramer's V test. Knowing if these variables are associated with each other will give us more incite into whether or not it would be appropriate to have them as predictors within our logistic regression models.
+
+#### **Association Strength Between Past E-Cigarette and Current Tobacco Cigarette Users **
+
+In the following code chunk, we first assessed whether a significant association exists between current/past e-cigarette and tobacco users as determined by a p-value less than 0.05 in the chi-square test. From there, we calculated Cramer's V algebraically using the statistic produced in the chi-square test. These calculations were repeated with each variation of the relationship between these categorical variables. 
+
+NOTE: Testing for multicollinearity would not be appropriate here since diagnosing and assessing multicollinearity is more useful for continuous, numerical variables not dichotomous (nominal), categorical variables. Because of this fact, VIF calculations would not accurately represent what is going on within the data. This is why the chi-square and Cramer's V tests are the most appropriate methods to use given the variables we want to explore.
+
+```{r}
+
+# 
+
+eecig_ctob <- table(nyts_data$ecig_ever, nyts_data$tobacco_current)
+
+n <- sum(eecig_ctob)
+
+min_nrows_ncols <- min(nrow(eecig_ctob), ncol(eecig_ctob))
+
+chi2 <- unname(chisq.test(eecig_ctob)$statistic)
+
+cramers_V <- sqrt(chi2/(n*(min_nrows_ncols-1)))
+
+chisq.test(eecig_ctob)
+paste("Cramer's V:", cramers_V)
+
+
+'-------------------------------------------------------------------'
+
+cecig_etob <- table(nyts_data$ecig_current, nyts_data$tobacco_ever)
+
+n <- sum(cecig_etob)
+
+min_nrows_ncols <- min(nrow(cecig_etob), ncol(cecig_etob))
+
+chi2 <- unname(chisq.test(cecig_etob)$statistic)
+
+cramers_V <- sqrt(chi2/(n*(min_nrows_ncols-1)))
+
+chisq.test(cecig_etob)
+paste("Cramer's V:", cramers_V)
+
+'-------------------------------------------------------------------'
+
+cecig_ctob <- table(nyts_data$ecig_current, nyts_data$tobacco_current)
+
+n <- sum(cecig_ctob)
+
+min_nrows_ncols <- min(nrow(cecig_ctob), ncol(cecig_ctob))
+
+chi2 <- unname(chisq.test(cecig_ctob)$statistic)
+
+cramers_V <- sqrt(chi2/(n*(min_nrows_ncols-1)))
+
+chisq.test(cecig_ctob)
+paste("Cramer's V:", cramers_V)
+
+'-------------------------------------------------------------------'
+
+eecig_etob <- table(nyts_data$ecig_ever, nyts_data$tobacco_ever)
+
+n <- sum(eecig_etob)
+
+min_nrows_ncols <- min(nrow(eecig_etob), ncol(eecig_etob))
+
+chi2 <- unname(chisq.test(eecig_etob)$statistic)
+
+cramers_V <- sqrt(chi2/(n*(min_nrows_ncols-1)))
+
+chisq.test(eecig_etob)
+paste("Cramer's V:", cramers_V)
+
+```
+
+It seems like current/ever use of e-cigarette and tobacco products are highly associated with each other (all with a p-value of less than 2.2e-16). Moreover, these associations all have moderately strong to very strong relationships based on the Cramer's V calculations ranging from 0.49 to 0.79. Based on these results, it would be then best to not use any pair of these variables as the predictors for our logistic regression models. For example, defining "ecig_current" and "tobacco_ever" as two predictors in the same multiple logistic regression model.
+
+NOTE: This does not mean that these variables cannot be evaluated as the outcome variables within a given model.
+
+### Main Question Analysis: Is Past E-Cigarette Use a Gateway to Smoking (Active Tobacco Use)?
+
+Now that we know what not to include in our model in the context of predictors, we can properly pursue and assess whether the gateway effect exists between past e-cigarette use (as defined as "ecig_ever") and current tobacco use ("tobacco_current") based on specified age groups (our predictor). **For all of the variations of the logistic regression model, we assess the probability of survey participants are currently using any tobacco products given that they have tried e-cigarettes in the past.
+
+#### ** Chance of Currently on Tobacco Given Trying E-Cigarettes Before Based on Age (Teens) **
+
+The first logistic regression takes in age as the predictor but in the context of teenage survey participants from the year of 2019 (most recent data) who have tried e-cigarettes in the past (participants from the ages of 13 to 17). Additionally, this age predictor is treated as numerical value meaning that the model will not separate these ages into categories but rather treat age as a continuous variable. 
+
+```{r}
+
+teens_nyts_data <- nyts_data %>% 
+  filter(Age %in% c(13:17)) %>% 
+  filter(ecig_ever == TRUE)
+
+dat2019 <- teens_nyts_data |>
+  filter(year == 2019)
+
+everSmoke_currVaper_teens <- logistic_reg() |>
+  set_engine("glm") |>
+  fit(as.factor(tobacco_current) ~ as.numeric(Age), data = dat2019, family = "binomial")
+
+(everSmoke_currVaper_teens_Tidy <- tidy(everSmoke_currVaper_teens))
+
+```
+
+This model reveals that the log odds of being a current tobacco user given that you have past history of using e-cigarettes increases 0.0631 with every one year increase in age.
+
+This is all good and dandy but what does this mean chance-wise based on percentage? In order to interpret this increase in percentage, we calculate the adjusted odds ratio (aOR) by using given coefficients or estimates, representing it in logarithmic form (with natural base e), subtracting the result by 1, creating an absolute value, and multiplying by 100.
+
+NOTE: The addition of the absolute value function is just used to help when interpreting the final results of a model and taking whether the log odds ratio or estimate is positive or negative into account.
+
+
+```{r}
+
+log_OR <- everSmoke_currVaper_teens_Tidy$estimate[2]
+e <- 2.303
+
+aOR <- 100 * (1 - (e ^ log_OR))
+abs(aOR)
+```
+**Results:** Increase in age by every one year for teenagers who have tried e-cigarettes, increases the chance of being a current tobacco user by 5.4%. 
+
+#### ** Chance of Currently on Tobacco Given Trying E-Cigarettes Before (Pre-Teeens vs. Teens) **
+
+The second logistic regression takes in age as the predictor but in the context of two primary age groups: preadolescences or pre-teens and teenagers. Again, this is taking into account only those who have tried e-cigarettes in the past. Additionally, this age predictor is treated as a categorical value compared to the numerical version in the last model meaning that the model will separate these ages into categories (using a factor function) but not as a continuous variable.
+
+```{r}
+
+preteen_teen_dat2019 <- nyts_data |>
+  filter(year == 2019, !is.na(Age)) |>
+  filter(Age %in% c(9:17)) |>
+  mutate(Ages = case_when(
+    Age %in% c(9:12) ~ 'pre-teen',
+    Age %in% c(13:17) ~ 'teens')) |>
+  filter(ecig_ever == TRUE)
+
+everSmoke_currVaper_ages <- logistic_reg() |>
+  set_engine("glm") |>
+  fit(as.factor(tobacco_current) ~ as.factor(Ages), data = preteen_teen_dat2019, family = "binomial")
+
+(everSmoke_currVaper_ages_Tidy <- tidy(everSmoke_currVaper_ages))
+```
+
+In this model, the log odds of being a current tobacco user given that you have past history of using e-cigarettes is 0.33 higher for teenagers than it is for pre-teens.
+
+Taking the aOR into account....
+
+```{r}
+
+log_OR <- everSmoke_currVaper_ages_Tidy$estimate[2]
+e <- 2.303
+
+chance_perc <- 100 * (1 - (e ^ log_OR))
+abs(chance_perc)
+```
+
+**Results:** The odds of being a current tobacco user for teens is 31.74% higher for teenagers who have tried e-cigarettes in the past compared to pre-teens who have tried e-cigarettes in the past.
+
+#### ** Chance of Currently on Tobacco Given Trying E-Cigarettes (teens vs. Adults) **
+
+This last logistic regression we'll look at takes in age as the predictor but in the context of two over-arching age groups: teens (those under 18) and adults (those 18 and older). Like the last model,the age predictor is treated as a categorical value but just in the context of teens and adults.
+
+
+```{r}
+
+oldest_dat2019 <- nyts_data |>
+  filter(year == 2019, !is.na(Age)) |>
+  mutate(Age_groups = case_when(
+    Age %in% c(13:17) ~ 'teens',
+    Age == 18 ~ 'adult',
+    Age == '>18' ~ 'adult')) |>
+  filter(ecig_ever == TRUE)
+
+
+everSmoker_currVaper_age <- logistic_reg() |>
+  set_engine("glm") |>
+  fit(as.factor(tobacco_current) ~ as.factor(Age_groups), data = oldest_dat2019, family = "binomial")
+
+(everSmoker_currVaper_Tidy0 <- tidy(everSmoker_currVaper_age))
+
+```
+
+The final logistic regression model shows that the log odds of being a current tobacco user given that you have past history of using e-cigarettes is 0.378 lower for teens than it is for adults.
+
+```{r}
+
+log_OR <- everSmoker_currVaper_Tidy0$estimate[2]
+e <- 2.303
+
+chance_perc <- 100 * (1 - e ^ log_OR)
+chance_perc
+```
+
+**Results:** Based on these calculations, the overall odds of being a current tobacco user for teens is around 25.88% lower for teenagers who have tried e-cigarettes in the past compared to adults.
+
+Now that the results for these individual models have been produced, it is time to discuss what this means overall in answering our main question.
+
+### Overall Results
+
+Overall, the results shows that the given past use of e-cigarettes chance of being a current tobacco user does increase with age, particularly during the teenage years, by a modest 5.4%. Additionally, the results change based on what age groups are assessed. For instance, the probability that teenagers who have tried e-cigarettes in the past being a current tobacco user is around 32% higher for them compared to pre-teens but the opposite effect is true when comparing teens to adults, around 26% lower chance for teens compared to adults. 
+
+The increased chances of becoming a current tobacco users within teenagers (both as age increases and comparing to pre-teens) suggests that teens may be more likely to be experimenting with currently tobacco products such as traditional cigarettes if they had past history of trying e-cigarettes. Although the decreased odds for teens compared to adults in the third model seems discouraging, the results also means that there's a higher chance for the adults that have tried e-cigarettes before to be currently using tobacco. 
+
+Within the adults group, the only specification provided is 18 years of age and over 18 but we don't know age range within the over 18 category. Participants from the over 18 category could have ages ranging from 19 to 22 years-old or 19 to 67 years-old, we don't know from the data that was provided to us. Moreover, this survey data is not longitudinal so we don't know if the teens that tried e-cigarette products but not current tobacco users in 2019 will become tobacco users in the future. However, what we can say is that there seems to be overall trend suggesting that the odds of the teens currently using tobacco products is higher than that of pre-teens and higher odds for adults compare to teens.
+
+## Conclusion
+
+
+
+## Extending Analysis
+
+Our main interest here lies with the fruity flavors that are more unique to e-cigarette products and when they were introduced in the market. JUUL, a company that was valued at $39 billion at its peak, introduced their sweet flavors on August 8, 2016 and banned the sale of these flavors at the end of 2019. FDA stated menthol and tobacco were the only two flavors allowed to be sold, although these polices change often learning about teen usage after 2019 can greatly affect e-cigarette usage. 
+
+### Question
+
+Do fruit flavors attract teenagers into e-cigarette? If so, what flavors? And do these results differ from gender to gender?  
+
+```{r}
+nyts_data1 <-nyts_data |>
+  filter(year != 2015) |>
+  filter(!is.na(Sex)) |>
+  group_by(year, Age, Sex) |>
+  
+  #Only looking at high school ages
+  filter((Age %in% c(14:18)))|>
+  summarize(Menthol = (mean(menthol) * 100),
+            `Clove or Spice` = (mean(clove_spice) * 100),
+            `Fruit` = (mean(fruit) * 100),
+            `Chocolate` = (mean(chocolate) * 100),
+            `Alcoholic Drink` = (mean(alcoholic_drink) * 100),
+            `Candy/Desserts/Sweets` = (mean(candy_dessert_sweets) * 100),
+            `Other` = (mean(other) * 100))|>
+  
+  #to make a longer format to combine flavors in one
+  pivot_longer(cols = -c(year, Age, Sex), 
+             names_to = "Flavor",
+             values_to = "Percentage of students")
+
+  #plotting a bar-plot to compare gender 
+  ggplot(nyts_data1, aes(y = `Percentage of students`, x = Age, fill = reorder(Flavor, `Percentage of students`))) +
+  
+  geom_bar(stat = "identity",
+           position = "dodge",
+           color = "black") +
+  scale_fill_viridis(discrete = TRUE) +
+  theme_linedraw() +
+  guides(fill = guide_legend("Flavor")) +
+  facet_wrap(~ Sex) 
+ 
+```
+We see here that "Fruit" and "Menthol" were the most consumed by males for all ages, the percentages vary un-significantly although within female we see a larger difference between menthol and fruit flavor with the 14 to 16 ages. As for ages 17 and 18, fruit and menthol have very close usages. 
+
+Doing the same analysis but including the years after the FDA ban can change teen gender usage. 
+
+
+### Citations
+
+Drug Administration, FDA, 2 Jan. 2020, https://www.fda.gov/news-events/press-announcements/fda-finalizes-enforcement-policy-unauthorized-flavored-cartridge-based-e-cigarettes-appeal-children.
+
+Glantz, Stanton. “Convincing Analysis That e-Cigs Are a Gateway to Cigarette Smoking from Studies around the World.” Center for Tobacco Control Research and Education, 25 May 2020, tobacco.ucsf.edu/convincing-analysis-e-cigs-are-gateway-cigarette-smoking-studies-around-world. 
+
+Hair, Elizabeth C.; Barton, Alexis A.; Perks, Siobhan N.; Kreslake, Jennifer; Xiao, Haijun; Pitzer, Lindsay; Leventhal, Adam M.; Vallone, Donna M. (2020). Association between e-cigarette use and future combustible cigarette use: evidence from a prospective cohort of youth and young adults, 2017-2019. Addictive Behaviors, (), 106593–. doi:10.1016/j.addbeh.2020.106593 
+
+“Young People Who Vape Are More Likely to Become Smokers.” Truth Initiative, 16 Sept. 2020, truthinitiative.org/research-resources/emerging-tobacco-products/young-people-who-vape-are-much-more-likely-become. 
+
+

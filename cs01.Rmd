@@ -1,0 +1,611 @@
+---
+title: "CS01 - Youth Disconnection"
+author: "Angela Chapman, Kareema Kilani, Joshua Suh"
+output: html_document
+---
+
+## Introduction/Background
+
+  Practical Data Science focuses on what’s practical. Researching the quantitative history of America’s societal issues is helpful to understanding future predictions and why these predictions can fall into place. This case study focuses on youth disconnection rates across the United States of America. 
+
+  Youth disconnection is defined as “teenagers and young adults between the ages of 16 and 24 who are neither in school nor working” (Making The Connection, Lewis) Youth disconnection is a prominent factor of an adult life and can affect a human’s future. 
+
+  This data comes from “Making The Connection: Transportation and Youth Disconnection” by Kristen Lewis written in 2019. Lewis not only focuses on youth disconnection by gender, race, and ethnicity but also youth disconnections by place, nationally, disabilities, and its correlation with transportation. 
+
+  The data we focus on is a subset of their analysis that dives into gender and ethnicity among youth disconnection. Within youth disconnection rates we focused on the seven major race ethnicities, Latinx ethnicities, and Asian ethnicities. All groups are categorized by gender, race, and ethnicity. The data points range from 2008 to 2017 for all major ethnicities and data points for Latinx and Asian subgroups come from 2017 and 2018. 
+
+  Our focus delves deeper into how have youth disconnection rates in American youth changed since 2008? In particular, how has this changed for different gender and ethnic groups? Are any groups particularly disconnected? 
+
+### Load packages
+
+```{r load-packages, message=FALSE}
+library(OCSdata)
+library(tidyverse)
+library(pdftools)
+library(tesseract)
+library(magick)
+library(tidymodels)
+```
+
+
+### Loading in the Data
+ 
+```{r Getting Data from PDF}
+pdf_tools_example <-
+  pdftools::pdf_text("data/raw/Making_the_Connection.pdf")
+```
+ 
+```{r Getting Data from PNG}
+major_racial_ethnic_groups <- 
+  magick::image_read("data/raw/Major_ethnic_groups_screenshot.png")
+magick::image_info(major_racial_ethnic_groups)
+```
+Using OCR, we read-in the values written in the .png file and store it in major_groups.
+ 
+ 
+ 
+```{r Extract text from an image}
+major_groups <- magick::image_ocr(major_racial_ethnic_groups)
+```
+ 
+We will do the same for the other images provided, but we will set aside this data for later. 
+ 
+```{r Reading In: Raw Asian Data}
+asian_sub_2017 <- image_read("data/raw/asian_subgroups_2017.png")
+asian_sub_2017_A <- image_read("data/raw/asian_sub_2017_A.png")
+asian_sub_2017_B <- image_read("data/raw/asian_sub_2017_B.png")
+asian_sub_2017_C <- image_read("data/raw/asian_sub_2017_C.png")
+asian_sub_2017 <- image_ocr(asian_sub_2017)
+asian_sub_2017_A <- image_ocr(asian_sub_2017_A)
+asian_sub_2017_B <- image_ocr(asian_sub_2017_B)
+asian_sub_2017_C <- image_ocr(asian_sub_2017_C)
+```
+ 
+```{r Reading In: Raw LatinX Data}
+latinx_imageA <- image_read("data/raw/latinx_sub_2017_A.png")
+latinx_imageB <- image_read("data/raw/latinx_sub_2017_B.png")
+latinx_imageC <- image_read("data/raw/latinx_sub_2017_C.png")
+latinx_sub_2017_A <- image_ocr(latinx_imageA)
+latinx_sub_2017_B <- image_ocr(latinx_imageB)
+latinx_sub_2017_C <- image_ocr(latinx_imageC)
+```
+ 
+```{r Asian Data}
+asian_sub_2018_A <- image_read("data/raw/asian_sub_2018_A.png")
+asian_sub_2018_A <- image_ocr(asian_sub_2018_A)
+asian_sub_2018_B <- image_read("data/raw/asian_sub_2018_B.png")
+asian_sub_2018_B <- image_ocr(asian_sub_2018_B)
+```
+ 
+ 
+```{r LatinX Data}
+latinx_sub_2018 <- image_read("data/raw/latinx_subgroups_2018.png")
+latinx_sub_2018 <- image_ocr(latinx_sub_2018)
+latinx_sub_2018
+```
+ 
+```{r Saving Data}
+save(
+  major_groups,
+  asian_sub_2017,
+  asian_sub_2017_A, 
+  asian_sub_2017_B,
+  asian_sub_2017_C, 
+  latinx_sub_2017_A,
+  latinx_sub_2017_B,
+  latinx_sub_2017_C,
+  asian_sub_2018_A,
+  asian_sub_2018_B,
+  latinx_sub_2018,
+  file = "data/raw/imported_data.rda")
+```
+ 
+## Data Wrangling
+ 
+After reading in the values using OCR, it's pretty evident that we can't quite use the results without some initial clean-up. 
+ 
+```{r}
+major_groups
+```
+ 
+To remedy this, we will try to put these into a readable format. It seems like all the rows are created with "\n" so we will pull the data apart at every instance of that character and make rows.
+ 
+```{r Cleaning up major_groups}
+major_groups <- major_groups |>
+  stringr::str_split(pattern = "\n") |>
+  unlist() |>
+  tibble::as_tibble()
+major_groups
+```
+ 
+Looking better! But to be able to manipulate and create visualizations from the data, we would have to create variables we can assign these values to.
+ 
+```{r Creating Columns}
+major_groups <- 
+  major_groups |>
+  tidyr::separate(col = value, 
+                  into = c("Group", "Years"), 
+                  sep = "(?<=[[:alpha:]])\\s(?=[0-9])")
+```
+ 
+```{r}
+major_groups
+```
+ 
+Even with these steps, there's a lot more tidying up to do. For instance, look at the mismatched cases under our Group column. We will apply some commands to make it more uniform. 
+ 
+```{r}
+major_groups <- major_groups |> 
+  mutate(Group = stringr::str_to_title(Group))
+major_groups
+```
+ 
+ 
+Then, we separate each Year value into its corresponding years based on the original PNG file. 
+ 
+```{r}
+major_groups <- major_groups |> 
+  tidyr::separate(col = Years, 
+                  into = c("2008", "2010", "2012", "2014", "2016", "2017"), 
+                  sep = " ")
+major_groups
+```
+ 
+Then we drop the NA values that were made from the step where we created our columns. 
+ 
+```{r}
+major_groups <- major_groups |> 
+  tidyr::drop_na()
+major_groups
+```
+ 
+If you look closely, the "year variables" are listed as <chr> variables, which we definitely do not want. We want these values as doubles, and we are going to accomplish this task by first removing the decimal points, converting the <chr> to numeric values, and adding back the decimal point by multiplying 0.1 to all the resulting values. 
+ 
+ 
+```{r}
+major_groups <- major_groups |>
+  mutate(
+    across(.cols = -Group,
+           ~ str_remove(string = ., pattern = "\\.")),  # remove decimal points
+    across(.cols = -Group, as.numeric),  # convert to numeric
+    across(.cols = -Group, ~ . * 0.1)   # get our decimal point back
+  )
+major_groups
+```
+ 
+And for later, we are going to make more columns.
+ 
+```{r}
+major_groups  <- major_groups |>
+mutate(Race_Ethnicity = dplyr::recode(Group, "United States" = "All_races",
+                                  "Female" = "All_races",
+                                  "Male" = "All_races"),
+   Race_Ethnicity = str_remove(string = Race_Ethnicity,
+                               pattern = "Female|Male"))
+```
+ 
+ 
+```{r}
+major_groups
+```
+ 
+We then extract the Gender variable using str_extract(), and make all NA values into "All" gender, as the absence of a gender means the general population in our context.
+ 
+```{r}
+major_groups  <- major_groups |>
+  mutate(Gender = str_extract(string = Group, 
+                              pattern = "Female|Male")) |>
+  mutate(Gender = replace_na(Gender, replace = "All"))
+```
+ 
+ 
+```{r}
+major_groups_long <- major_groups |>
+  tidyr::pivot_longer(cols = contains("20"), # any column containing 20
+                      names_to = "Year",
+                      values_to = "Percent",
+                      names_prefix = "Perc_") |>
+  dplyr::mutate(Year = as.numeric(Year))
+```
+ 
+For the next parts, we will start creating functions to avoid redundant work.
+ 
+```{r}
+make_rows <- function(text){
+  text |>
+  str_split("\n") |>
+  unlist() |>
+  as_tibble()
+}
+```
+ 
+ 
+```{r}
+asian_sub_2017 <- make_rows(asian_sub_2017) 
+```
+ 
+ 
+```{r}
+asian_sub_2017_A <- make_rows(asian_sub_2017_A)
+asian_sub_2017_B <- make_rows(asian_sub_2017_B)
+asian_sub_2017_C <- make_rows(asian_sub_2017_C)
+```
+ 
+```{r}
+asian_sub_2017 <- bind_rows(asian_sub_2017_A, 
+                            asian_sub_2017_B,
+                            asian_sub_2017_C)
+asian_sub_2017
+```
+ 
+Here's a big function that cleans the data like how we did with major_groups.
+ 
+ 
+```{r}
+clean_table <- function(table){
+  table |>
+    separate(col = value,
+             into = c("Group", "Percentage"),
+             sep =  "(?<=[[:alpha:]])\\s(?=[0-9])") |> 
+    drop_na() |>
+    mutate(Group = str_to_title(Group)) |>
+    mutate(Percentage = str_remove(string = Percentage,
+                                   pattern = "\\.")) |>
+    separate(Percentage, c("Percent"), sep = " ") |>
+    mutate(Percent = as.numeric(Percent)) |>
+    mutate(Percent = Percent * 0.1) |>
+    mutate(Race_Ethnicity = recode(Group, 
+                                   "United States" = "All_races",
+                                   "Female" = "All_races",
+                                   "Male" = "All_races")) |>
+    mutate(Race_Ethnicity = str_remove(string = Race_Ethnicity,  
+                                       pattern = " Female| Male")) |>
+    mutate(Gender = str_extract(string = Group,
+                                pattern ="Female|Male")) |>
+    mutate(Gender = replace_na(Gender, replace = "All"))
+}
+```
+ 
+ 
+```{r}
+asian_sub_2017 <- clean_table(table = asian_sub_2017)
+```
+ 
+```{r}
+asian_sub_2017
+```
+ 
+Now that the Asian subgroup table looks clean, we will do the same process with the Latinx subgroup.
+ 
+```{r}
+latinx_sub_2017 <- stringr::str_c(latinx_sub_2017_A,
+                                  latinx_sub_2017_B, 
+                                  latinx_sub_2017_C)
+latinx_sub_2017
+```
+ 
+There seems to be a typo here.
+ 
+```{r}
+latinx_sub_2017 <- latinx_sub_2017 |>
+  str_replace(pattern = "DR, Cuban Female 15.7\nPR",
+              replacement = "DR, Cuban Male 15.7\nPR")
+```
+ 
+ 
+```{r}
+latinx_sub_2017 <- make_rows(latinx_sub_2017)
+latinx_sub_2017 <- clean_table(table = latinx_sub_2017)
+```
+ 
+Now, we move onto the 2018 data. Starting with the Asian subgroup:
+ 
+```{r}
+asian_sub_2018 <- str_c(asian_sub_2018_A, asian_sub_2018_B)
+asian_sub_2018 <- make_rows(asian_sub_2018)
+asian_sub_2018
+```
+ 
+The 2018 data seems to have different quirks from the 2017 one. We modified the function in order to cater to these changes.
+ 
+```{r}
+clean_table_2018 <- function(table){
+  table |>
+    separate(col = value, 
+             into = c("Group", "Percent"), 
+             sep =  "(?<=[[:alpha:]])\\s:\\s|\\s(?=[0-9])") |> 
+    mutate(Group = str_remove(string = Group, 
+                            pattern = ":")) |>
+    drop_na() |>
+    mutate(Group = str_to_title(string = Group)) |>
+    mutate(Percent = str_remove(string = Percent, 
+                               pattern = "\\.")) |>
+    mutate(Percent = as.numeric(Percent)) |>
+    mutate(Percent = Percent * 0.1) |>
+    mutate(Race_Ethnicity = str_replace(string = Group,
+                                        pattern = "Men|Women",
+                                        replacement = "missing")) |>
+    mutate(Race_Ethnicity = na_if(Race_Ethnicity, "missing")) |>
+    fill(Race_Ethnicity, .direction = "down") |>
+    mutate(Gender = str_extract(string = Group, 
+                                pattern = "Men|Women")) |>
+    mutate(Gender = replace_na(Gender, replace = "All"))
+}
+```
+ 
+ 
+```{r}
+asian_sub_2018 <- clean_table_2018(asian_sub_2018)
+```
+ 
+And we add the remaining data from the text manually.
+ 
+```{r}
+asian_sub_2018 <- asian_sub_2018 |>
+  add_row(Group = "Asian", Percent = 6.2,
+          Race_Ethnicity = "Asian", Gender = "All") |>
+  add_row(Group = "Asian", Percent = 6.4,
+          Race_Ethnicity = "Asian", Gender = "Men") |>
+  add_row(Group = "Asian", Percent = 6.1,
+          Race_Ethnicity = "Asian", Gender = "Women")
+asian_sub_2018
+```
+ 
+In order to combine the two years, we will label each data as the corresponding year.
+ 
+```{r}
+asian_sub_2017 <- asian_sub_2017 |>
+  mutate(Year = 2017)
+asian_sub_2018 <- asian_sub_2018 |>
+  mutate(Year = 2018)
+```
+ 
+Since there seems to be different ways to label gender, we will make it uniform.
+ 
+```{r}
+asian_sub_2018 <- asian_sub_2018 |> 
+  mutate(across(.cols = c(Gender, Group),
+               ~ str_replace(string = ., 
+                             pattern = "Men", 
+                             replacement = "Male")),
+         across(.cols = c(Gender, Group),
+               ~ str_replace(string = ., 
+                             pattern = "Women", 
+                             replacement = "Female")))
+```
+ 
+Combining data...
+ 
+```{r}
+asian_subgroups <- bind_rows(asian_sub_2017, asian_sub_2018)
+```
+ 
+Cleaning up missing information...
+ 
+```{r}
+asian_subgroups <- asian_subgroups |> 
+  select(-Group) |>
+  pivot_wider(names_from = Year, 
+              values_from = Percent) |>
+  pivot_longer(cols = -c(Race_Ethnicity, Gender),
+               names_to = "Year",
+               values_to= "Percent")
+```
+ 
+Then we do the same to Latinx subgroup.
+ 
+```{r}
+latinx_sub_2018 <- str_replace_all(string = latinx_sub_2018, 
+                                  pattern = "\\s:\n{2}|\n{2}", #remove two newline characters
+                                  replacement = " ")
+latinx_sub_2018 <- make_rows(latinx_sub_2018 )
+latinx_sub_2018 <- clean_table_2018(latinx_sub_2018)
+```
+ 
+ 
+```{r}
+fix_latinx_naming <- function(table){ 
+  table |>
+  mutate(Group = str_replace(string = Group,
+                             pattern = "Pr, Dr, Cuban",
+                             replacement = "Puerto Rican, Dominican, Cuban"), 
+          Race_Ethnicity = str_replace(string = Race_Ethnicity,
+                                       pattern = "Pr, Dr, Cuban",
+                                       replacement = "Puerto Rican, Dominican, Cuban"))
+}
+latinx_sub_2017 <- fix_latinx_naming(latinx_sub_2017)
+latinx_sub_2018 <- fix_latinx_naming(latinx_sub_2018)
+```
+ 
+```{r}
+latinx_sub_2018 <- latinx_sub_2018 |>
+  add_row(Group = "Latinx", Percent = 12.8,
+          Race_Ethnicity = "Latinx", Gender = "All") |>
+  add_row(Group = "Latinx", Percent = 12.3,
+          Race_Ethnicity = "Latinx", Gender = "Men") |>
+  add_row(Group = "Latinx", Percent = 13.3,
+          Race_Ethnicity = "Latinx", Gender = "Women")
+```
+ 
+ 
+```{r}
+latinx_sub_2018 <- latinx_sub_2018 |>
+  mutate(across(.cols = c(Gender, Group),
+                ~ str_replace(string = ., pattern = "Men", replacement = "Male")),
+         across(.cols = c(Gender, Group),
+                ~ str_replace(string = ., pattern = "Women", replacement = "Female")))
+```
+ 
+Combining years...
+ 
+```{r}
+latinx_sub_2017 <- latinx_sub_2017 |>
+  mutate(Year = 2017)
+latinx_sub_2018 <- latinx_sub_2018 |>
+  mutate(Year = 2018)
+latinx_subgroups <- bind_rows(latinx_sub_2017, latinx_sub_2018)
+```
+ 
+Adding missing categories...
+ 
+```{r}
+latinx_subgroups <- latinx_subgroups |>
+  select(-Group) |>
+  pivot_wider(names_from = Year, values_from = Percent) |>
+  pivot_longer(cols = -c(Race_Ethnicity, Gender), 
+               names_to ="Year" , 
+               values_to="Percent")
+```
+ 
+And we finally save these tables into files.
+ 
+```{r}
+save(major_groups_long, asian_subgroups, latinx_subgroups, file = "data/wrangled_data.rda")
+readr::write_csv(major_groups_long, file = "data/wrangled_major_groups_data.csv")
+readr::write_csv(asian_subgroups, file = "data/wrangled_asian_subgroups_data.csv")
+readr::write_csv(latinx_subgroups, file = "data/wrangled_latinx_subgroups_data.csv")
+```
+
+
+### Question 1: Exploratory Data Analysis
+
+We first wanted to filter the Gender and Race_Ethnicity columns for factors that describe the entire population. We did this to avoid redundancies of including the sub-groups’ data which is encompassed in the all-races, all-gender data.
+
+```{r}
+major_all <- major_groups_long |>
+  filter(Gender == "All", Race_Ethnicity == "All_races")
+p <- ggplot(major_all, aes(x = Year, y = Percent)) +
+  geom_line(stat = "identity") +
+  geom_point(size = 3) +
+  scale_x_continuous(breaks = c(2008, 2010, 2012, 2014, 2016)) +
+  labs(title = "Percentage of disconnected youth in America over the years")
+p
+```
+
+From preliminary observations, we can see that there was a large increase in percentage from 2008 to 2010, but for other periods of time, it has been decreasing monotonically, and ultimately in the year 2016, the percentage has dipped below 2008 levels.
+
+### Question 1: Data Analysis
+
+```{r}
+p + geom_smooth(method = "lm", se = FALSE)
+```
+
+Here we have plotted the line of best fit to better visualize the relationship between the percentage of disconnected youth and time. While it doesn’t go through much of the data points, the trend shows that on average, the percentage of disconnected youth has been on the decline over the years.
+
+To analyze our visualizations further, we found the slope and the y-intercept of the linear model we fitted to our data. 
+
+```{r}
+linear_reg() |>
+  set_engine("lm") |>
+  fit(Year ~ Percent , data = major_all) |>
+  tidy()
+```
+
+From these values, we can see that on average, there’s a 1.692 decrease in percentage of disconnected youth per year. We disregard the y-intercept from this data because 1. 2034.77 would mean 2034.77% in our context which doesn’t make any sense, and 2. While the slope of the line shows a linear relationship between the two variables and thus assumes the trajectory for the past years and the future years, it is clearly not the case that the real life data follows this pattern (i.e. increase in percentage between 2008 and 2010).
+
+### Results
+
+From the visualizations and the slope given by the linear regression, all the statistics point to the claim that the percentage of disconnected youth is on the decline. 
+
+
+#### Question 2: Exploratory Data Analysis
+
+In order to explore the question of how youth disconnection rates have changed over time considering factors like race and gender, we decided to do a line plot that depicts the trends of the rates as a function of time in years. We wanted to see how these trends differ among race and gender so we did that by adding the factor of race within the plot using the color function from ggplot and used the facet_wrap function to see the differences between male and female youth. 
+
+```{r}
+major_groups_long |>
+  filter(Gender != "All", Group != "United States") |>
+  ggplot(aes(x = Year, y = Percent, color = Race_Ethnicity)) +
+    geom_line(size = 0.5) +
+    geom_point(size = 3) + 
+    facet_wrap(~Gender) +
+    scale_x_continuous(breaks = c(2008, 2010, 2012, 2014, 2016)) +
+    labs(title = "Percentage of disconnected youth in America over the years across gender and race ", color = "Race Ethnicity") 
+```
+
+From this plot, you can see that there are differences in the trends between Latinas and Latinos. Latinas steadily having decreasing rates of disconnection over time  while Latinos having an initial increase from 2007 to 2010 but steadily decreasing from there. Although we see generally higher trends of disconnection rates for male youth compared to female youth based on the plot, we see that there are higher disconnection rates for Black and Native-American males compared to Black and Native-American females, the highest being around 30% of Native-American males experiencing disparities back in 2010.
+
+#### Question 2: Data Analysis
+
+Based on the trends of disconnection rates among youth with varying by ethnicities, it seems like we see that there's a difference in youth disconnection between males and females by race (especially in the Black and Native-American groups). We wanted to use this information to see whether a linear model with the predictors of year, race, and gender is better than a model with just the predictors year and race. To do this, we use the lm function to create the two linear models and the anova function to see if the model with the extra predictor of gender is significantly better than the other model.
+
+
+```{r}
+model0 <- lm(Percent ~ Year + Race_Ethnicity, major_groups_long)
+model1 <- lm(Percent ~ Year + Race_Ethnicity + Gender, major_groups_long)
+an0 <- anova(model0, model1)
+an0
+```
+
+### Results
+
+In the light of seeing whether gender accounts for more of the variance compared to race based on their linear models, the results show that model 2 (the addition of gender) explains more of the variance compared to race as the predictor as depicted the p-value of 0.0008. This means that the addition of gender into the linear model does significantly makes the model better as it further describes the way in which gender may have more of an impact to the disconnection rates among youth. 
+
+### Extending the Analysis
+
+Our analysis focused gender, race, and major ethnicity. Understanding subgroups within Latinx and Asian ethnicities can extend the analysis of understanding the influences of gender among the same race. To understand what can be extended let's plot a barplot of youth disconnection rates across each Asian and Latinx subgroups between gender.  
+
+```{r viz-1}
+asian_subgroups|>
+    filter(Gender != "All",
+           Race_Ethnicity != "All_races",
+           Race_Ethnicity != "Hmong",
+           Race_Ethnicity != "Asian")|>
+    
+        ggplot(aes(x = Race_Ethnicity, y = Percent, fill = Gender)) +
+      
+        geom_bar(stat="identity", position=position_dodge(), width = 0.7) +
+        
+          
+        labs(title = "Youth disconnection rates in Asian subgroups compared across Gender", 
+             x = "Asain Ethnicity") + 
+          
+        theme(plot.title = element_text(size = 11, face = "bold"),
+                  axis.text.x = element_text(size = 8, face = "bold")) 
+```
+
+Removed data points with incomplete data points.
+
+Over all we see a significant difference of youth disconnection rates between genders with Filipino, Indian, Korean, and Vietnamese subgroups. Within Filipino and Indian, women have higher rates. Within Korean and Vietnamese, men have higher rates. Lastly within the Chinese subgroup, we see no significant difference.
+
+Plotting a similar bar plot of youth disconnection rates across Latinx subgroups between gender.
+
+```{r viz-2}
+latinx_subgroups|>
+  
+  filter(Gender != "All", 
+         Race_Ethnicity != "All_races",
+         Race_Ethnicity != "Latinx",
+         Race_Ethnicity != "Other Latina", 
+         Race_Ethnicity != "Other Latino",
+         Race_Ethnicity != "Latina", 
+         Race_Ethnicity != "Latino")|>
+  
+    ggplot(aes(x = Race_Ethnicity, y = Percent, fill = Gender)) +
+    
+      geom_bar(stat="identity", position=position_dodge(), width = 0.7) +
+     
+        labs(title = "Youth disconnection rates in Latinx subgroups compared across Gender?", 
+             x = "Latinx Ethnicity") + 
+          
+            theme(plot.title = element_text(size = 11, face = "bold"),
+                  axis.text.x = element_text(size = 7)) 
+```
+
+Removed data points with incomplete data points. 
+
+We see a difference of four percent between gender in the Central American ethnicity, with the female gender having a slight larger rate. Overall we don't see a significant difference of youth disconnection rates between genders among Latinx subgroups.
+
+Analysis across gender can be extended through research of gender roles within certain cultures and if there is reasoning of seeing large gaps within some genders and smaller gaps within others. This is meaningful as it's a step closer to understanding if youth disconnection heavily impacts or doesn't affect the growth of certain ethnicities 
+
+
+## Conclusion
+
+Looking at the result of the first question, it appears as if the whole disconnected youth population is declining uniformly, but upon examining the second question, we are made aware that there is a distinct disparity between ethnic groups. Stereotypically well-off White and Asians populations have consistently low statistics, but other ethnic groups generally display volatility in forms of disparities between gender within the group, or an increasing percentage of disconnected youth while those of other ethnic groups are decreasing for that year.  
+
+The truth of the matter is, this dataset only looks at the results of these unknown variables. There are extraneous geological, financial or cultural factors that push the statistics into unfavorable places, but without knowing what those variables are, predicting what the future might hold becomes increasingly difficult. 
+
+However, the more we are educated about the differences, advantages, and disadvantages among ethnicities, the better we can apply practical solutions to decrease youth disconnection rates over all. We hope this gradual understanding of youth disconnection becomes a step toward an equitable upbringing for all youths across the nation. 
+
+Lewis, Kristen. Making the Connection: Transportation and Youth Disconnection. New York: Measure of America, Social Science Research Council, 2019. 
+

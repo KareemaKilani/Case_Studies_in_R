@@ -1,0 +1,646 @@
+---
+title: "Final Project  - Your Title Here"
+author: "Angela Chapman, Kareema Kilani, Joshua Suh"
+output: html_document
+---
+
+## Introduction
+After accruing 4 years of undergraduate experience, students are presented with a choice to pursue a graduate degree. There are a lot of factors at play in this decision; and among those, the most important factor would be the rising tuition and the reduced amount of financial aid. From a data observation, the average debt among master’s degree holders is about a 100% increase from that of bachelor’s-only holders (1). Considering the weight of this financial burden, it’s very difficult to imagine any return on investment into further education. Would holding a master’s degree automatically improve your chances of financial security? Would the profession pay itself off in the future? Doubt creeps in and deter people from ever considering a graduate tract. 
+
+If we want to show the benefits of attending graduate school, we would have to show concrete evidence that receiving a higher degree would increase the pay and decrease the unemployment rate. Using the dataset provided by FiveThirtyEight, we are going to explore if there are any observable differences between graduate and non-graduate employees and their overall statistics. And hopefully, we could use our findings in this project to better inform ourselves.
+
+## Question
+
+Main Question
+
+- What job industries value non-graduate degrees compared to graduate degree based on median income? 
+
+Sub-Question
+
+- What job industries value job security with individuals with non-graduate degrees compared to graduate degree based on unemployment rate?
+
+- Within the major categories that have those opposite extremes in unemployment rate and average median income, which specific majors within those categories have the smallest and largest proportions in median income and unemployment rate?
+
+Extension Question
+
+- How to these job industries compare when looking across gender for individual survey statistics? 
+
+### Load packages
+
+```{r load-packages, message=FALSE}
+library(tidyverse)
+library(scales)
+library(tidymodels)
+```
+
+## The Data
+
+Two types of overall data are used in this project: one being data in regards to earnings and employment for recent college graduates based on major from the American Community Service 2010-2012 Public Use Micro data Series and another containing data that explores long-term occupational employment projections for the years of 2018 to 2028 from the California Employment Development Department.
+
+### Data Import
+
+```{r, message=FALSE, warning=FALSE}
+all_ages <- read_csv('data/all-ages.csv')
+grad_students <- read_csv('data/grad-students.csv')
+majors <- read_csv('data/majors-list.csv')
+recent_grads <- read_csv('data/recent-grads.csv')
+women_stem <- read_csv('data/women-stem.csv')
+occupation_employment_lt <- read_csv('data/Long-Term_Occupational_Employment_Projections.csv')
+```
+
+### Data Wrangling
+
+#### **Combine Datasets**
+
+```{r}
+# Combining the recent graduates and all ages datasets together by columns using the cbind function
+adj_first <- cbind(recent_grads, all_ages)
+
+# Combining the adjusted dataset above and the grad students dataset to get the final dataset ("collge_roi_df")
+college_roi_df <- cbind(adj_first, grad_students)
+```
+
+#### Delete Unnecessary Columns in the Projected Employment Dataset **
+
+```{r}
+colnames(recent_grads) <- make.unique(names(recent_grads))
+recent_grads %>% 
+  group_by(Major_category) %>% 
+  summarise(N = n())  
+```
+
+## Analysis
+
+We have multiple data sets and rather than combing we decided to use then independently as if we combine them we often variable name duplicates. 
+
+### Exploratory Data Analysis
+
+The range of income of each major categories differs as the demand for specific majors for a job industry heavily differentiate. To learn more about our recent under-graduate data we looked at major category incomes with a IQR and data point plot.  
+
+```{r}
+#recent grad data set
+recent_grads|>
+  
+  #excluding majors categories with less than five majors
+  filter(!(Major_category %in% c("Communications & Journalism", "Interdisciplinary", "Law & Public Policy"))) |>
+
+  ggplot(mapping = aes(y = Major_category, x = Median)) + 
+  
+  #data point for each major
+  geom_point(alpha=0.5, color="forest green") +
+  
+  #box plot to show the range
+  geom_boxplot(alpha = 0.3, fill = "gray") +
+    
+  scale_x_continuous(labels = comma) +
+  
+  labs(title = "Range of income for all major catergories for under-graduates",
+      
+       x ="Median Income", y = "Major Catergory")
+  
+```
+
+The range for many of these major categorizes stay within the same realm, the median is often between 30,000 until 40,000 excluding the "Engineering" and "Computer and Mathematics" categories
+
+To learn more about our graduate student data we looked at major category incomes with a IQR and data point plot.  
+
+```{r}
+#grad student data set
+grad_students|>
+  
+  #excluding majors categories with less than five majors
+  filter(!(Major_category %in% c("Communications & Journalism", "Interdisciplinary", "Law & Public Policy"))) |>
+
+  ggplot(mapping = aes(y = Major_category, x = Grad_median)) + 
+  
+  #data point for each major
+  geom_point(alpha=0.5, color="forest green") +
+  
+  #box plot to show the range
+  geom_boxplot(alpha = 0.3, fill = "gray") +
+    
+  scale_x_continuous(labels = comma) +
+  
+  labs(title = "Range of income for all major catergories for grad students",
+      
+       x ="Median Income", y = "Major Catergory")
+```
+
+The range for many of these major categorizes differs from under-grad as there a is far larger range within most categories. The scale is also as a higher point at the starting just below 50,000
+
+The following code is used to compute the average unemployment of each major across under-grad and grad, with the purpose to compare them. 
+
+Average unemployment rate of recent under-graduate per major
+
+```{r}
+recent_grads_average <- recent_grads|>
+  group_by(Major_category)|> 
+  summarise(sum_major = n(), sum_unemployment = sum(Unemployment_rate)) |> #collecting counts
+  mutate(average = sum_unemployment/sum_major)  #dividing the sum of major by the sum unemployment
+
+recent_grads_average$Type <- "Under-Graduate"
+```
+
+Average unemployment rate of graduate students per major
+
+```{r}
+grad_student_average <- grad_students|>
+  group_by(Major_category)|>
+  summarise(sum_major = n(), sum_unemployment = sum(Grad_unemployment_rate)) |>
+  mutate(average = sum_unemployment/sum_major)
+
+grad_student_average$Type <- "Graduate"
+```
+
+Combing both data sets
+
+```{r}
+both_average <- bind_rows(recent_grads_average, grad_student_average)
+```
+
+```{r, warning=FALSE}
+#bar plot to compare each major catehries using a data type to use the fill function
+ggplot(both_average, mapping = aes(x = reorder(Major_category, -average), y = average, fill = Type)) +
+         
+  geom_bar(stat = "identity",fun.y = "mean", position = "dodge", width = 0.65) +
+
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1)) +
+  
+  scale_fill_brewer(palette="Set1") +
+
+  scale_y_continuous(label = c("0%", "2.5%" ,"5.0%", "7.5%", "10%")) +
+  
+  labs(title = "Comparing average unemployment rate between graduate & under-graduate",
+      
+       x ="Major Catergory", y = "Unemployment (0% to 10%)")
+```
+
+Overall, we see a higher unemployment rate withing under-grad except for "Industrial Art and Consumer Services"
+
+Average median income of under-graduate students per major
+
+```{r}
+recent_grads_median <- recent_grads|>
+  group_by(Major_category)|>
+  summarise(sum_major = n(), sum_unemployment = sum(Median)) |>
+  mutate(Median_avg = sum_unemployment/sum_major)
+
+recent_grads_median$Type <- "Under-Graduate"
+```
+
+Average median income of graduate students per major
+
+```{r}
+grad_student_median <- grad_students|>
+  group_by(Major_category)|>
+  summarise(sum_major = n(), sum_unemployment = sum(Grad_median)) |>
+  mutate(Median_avg = sum_unemployment/sum_major)
+
+grad_student_median$Type <- "Graduate"
+```
+
+Combing both data sets
+
+```{r}
+both_med_average <- bind_rows(recent_grads_median, grad_student_median)
+```
+
+```{r, warning=FALSE}
+#bar plot to compare each major catehries using a data type to use the fill function
+ggplot(both_med_average, mapping = aes(x = reorder(Major_category, -Median_avg), y = Median_avg, fill = Type)) +
+         
+  geom_bar(stat = "identity",fun.y = "mean", position = "dodge", width = 0.7) +
+
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1)) +
+  
+  scale_fill_brewer(palette="Set1") +
+  
+  labs(title = "Comparing average median income between graduate & under-graduate",
+      
+       x ="Major Catergory", y = "Median Income")
+```
+Overall, we see a higher median income within under-graduate. 
+
+Our EDA shows us a overall understanding of the Data but doesn't given us the exact job industries with the "best" and "wosrt" value of grad and under-grad degrees.
+
+## Data Analysis
+
+For this data analysis, we'll be first look at the general fields (defined as major categories) that are most valuable in terms of median income and employment rate (a way to measure job security) based on whether or not a collection of individuals from the same field have only an undergraduate degree or an graduate degree. Whether particular job industries value certain graduate or undergraduate degrees more income-wise will be measured through the calculation of the percent change between the average graduate and undergraduate median incomes within each major category. Likewise, the fields that have the lowest and highest unemployment rates will be calculated through the percent change between the average graduate and undergraduate unemployment rates within each major category. Based on the results, we'll dive deeper into which specific majors (aka subfields) within the major categories (highest and lowest median incomes/unemployment rates) truly are the best and worst in value based on these two important measures of income and employment. 
+
+NOTE: For the sake of this analysis, non-graduate and undergraduate degrees are synonymous. 
+
+First let's start with the first part of the main question....
+
+### What job industries value graduate degrees compared to non-graduate degrees more based on median income?
+
+In order to answer this question, we have to calculate the percent change between the average graduate median incomes and the average undergraduate median incomes based on their respective major categories. 
+
+#### ** Calculating Percent Change Between Graduate and Undegraduate Median Income By Major Category **
+
+These calculations were done by combining two datasets: one that had the average median incomes for graduated undergraduates that got their bachelor's degrees and another that had the average median incomes for recent graduated professionals that got their graduate degrees. From there, the combined datasets are created into a wider format (using the pivot wider function) so that differences in average median incomes between the graduate and undergraduate fields of study can be properly calculated and interpretable in the resulting table. The percent change is calculated through dividing the average undergraduate median income for each major category from the difference in the average median incomes between undergraduate and graduate fields. Then the resulting table of those percent changes in median incomes are ordered from highest to lowest meaning that the fields on top haves highest percentage change in median income (the graduate degrees that have more leverage income-wise) and the bottom has the lowest.
+
+This process will be repeated for the unemployment rates by major category and the analyses for specific majors within those major categories that are the most and least valuable income and employment-wise. 
+
+NOTE: This first code chunk produces a table listing all the major categories in terms of highest to lowest in terms of percent change in median incomes. 
+
+```{r}
+
+combine_rows <- bind_rows(recent_grads_median, grad_student_median)
+
+grad_vs_undergrad_median <- combine_rows %>%
+  select(Major_category, Type, Median_avg) %>% 
+  pivot_wider(names_from = Type,
+              values_from =  Median_avg) %>% 
+  rename("Avg_Undergrad_Median" = "Under-Graduate",
+         "Avg_Grad_Median" = "Graduate") %>% 
+  mutate(Avg_Median_Diff = Avg_Grad_Median - Avg_Undergrad_Median)
+
+grad_vs_undergrad_median <- grad_vs_undergrad_median[, c(1,3,2,4)]
+
+perc_change_median <- grad_vs_undergrad_median %>% 
+  mutate(Percent_Change_Median = 100 * (Avg_Median_Diff / Avg_Undergrad_Median))
+  
+
+perc_change_median <- perc_change_median[, c(1,5,2,3,4)]
+
+
+perc_change_median <- perc_change_median %>% 
+  arrange(desc(Percent_Change_Median)) %>% 
+  select(Major_category, Percent_Change_Median)
+
+perc_change_median
+```
+
+Based on this table, graduate degrees in Biology and Life Sciences have the most leverage in median income compare to undergraduate with a percentage increase of over 127% while graduate degrees in interdisciplinary fields have the lowest percent change in median income with a 57% increase. 
+
+#### ** Resulting Table for 5 Highest and Lowest Percent Changes in Median Incomes (Undergraduate vs. Graduate Degrees) **
+
+To get a better idea of what the highest and lowest percent changes in median incomes are based on major category, we list the 5 highest and lowest percent changes in median income in one precise table using the bind_rows function. 
+
+```{r}
+
+
+perc_change_median_highest <- perc_change_median %>% 
+  head(5) %>% 
+  select(1,2)
+perc_change_median_lowest <- perc_change_median %>% 
+  tail(5) %>% 
+  select(1,2)
+
+perc_change_median_result <- bind_rows(perc_change_median_highest, perc_change_median_lowest)
+
+perc_change_median_result
+
+```
+
+The results here shows that the top 5 fields that benefit the most income-wise with a graduate degree compared to an undergraduate degree are Biology & Life Sciences, Health, Physical Sciences, Humanities & Arts, and Psychology/Social Work. These top 5 range from percentage increases of 107% to 127%. This could indicate that it is best to go to graduate school if you want better median income if you are interested in any of these fields compared to just having an undergraduate degree. 
+
+The bottom 5 fields that benefit the least income-wise with a graduate degree compared to an undergraduate degree are Law & Public Policy, Education, the Arts, Engineering, and the interdisciplinary fields. These bottom 5 range from percentage increases of 57% to 81%. This could indicate that it may or may not be worth going through additional years of education with graduate school financially and that an undergraduate degree could suffice on its own. 
+
+
+### What job industries value non-graduate degrees compared to graduate degree based on unemployment rate?
+
+Now we go into the second part of the question which addresses the issue of the average unemployment rate between graduates of graduate and undergraduate programs based on their major categories. 
+
+#### ** Calculating Percent Change Between Graduate and Undegraduate Unemployment Rate By Major Category **
+
+The way in which these percent changes were calculated for average unemployment rates was the same process compared to the way in which percent changes were calculated for average median incomes: combine datasets, reshape dataset into a wider format, find difference and divide, and then arrange the table. The only difference here was that the table was arrange from lowest unemployment rate (which is ideal) to the highest unemployment rate (questions job security). 
+
+```{r}
+
+combine_rows <- bind_rows(recent_grads_average, grad_student_average)
+
+grad_vs_undergrad_unemployed <- combine_rows %>%
+  select(Major_category, Type, average) %>% 
+  pivot_wider(names_from = Type,
+              values_from =  average) %>% 
+  rename("Avg_Undergrad_Unemployed" = "Under-Graduate",
+         "Avg_Grad_Unemployed" = "Graduate") %>% 
+  mutate(Avg_Unemployed_Diff = Avg_Grad_Unemployed - Avg_Undergrad_Unemployed)
+
+grad_vs_undergrad_unemployed <- grad_vs_undergrad_unemployed[, c(1,3,2,4)]
+
+perc_change_employ <- grad_vs_undergrad_unemployed %>% 
+  mutate(Percent_Change_Unemployment = 100 * (Avg_Unemployed_Diff / Avg_Undergrad_Unemployed))
+   
+
+perc_change_employ <- perc_change_employ[, c(1,5,2,3,4)]
+
+
+perc_change_employ <- perc_change_employ %>% 
+  arrange(Percent_Change_Unemployment) %>% 
+  select(Major_category, Percent_Change_Unemployment)
+
+perc_change_employ
+```
+
+Based on these results, the interdisciplinary fields have the lowest employment rate at 71% lower in unemployment rates for graduates of interdisciplinary graduate programs compared to their undergrad counterparts while industrial arts and consumer services have the highest percentage change in unemployment rate at around 40% higher for graduates of industrial arts and consumer services graduate programs. This may mean that individuals that have done the consumer services graduate programs have a harder time finding a job in their field compared to individuals that got their undergraduate degree within the same program.
+
+NOTE: There does seem to be quite a change for the interdisciplinary field as it has the lowest percent change in average median income (this is not ideal) while also having the lowest unemployment rates for graduate-degree holders based on percent change. This is an interesting observation as this result shows that have a graduate degree in interdisciplinary fields may provide more job security but have the least increase in pay. 
+
+#### ** Resulting Table for 5 Highest and Lowest Percent Changes in Employment Rate (Undergraduate vs. Graduate Degrees) **
+
+NOTE: This final table for the highest and lowest percent changes in unemployment rate based on major category is arrange from lowest to highest, the ones on the lower end (negative values) are more ideal while the higher end is more concerning.
+
+```{r}
+
+perc_change_employ_lowest <- perc_change_employ %>% 
+  head(5) %>% 
+  select(1,2)
+perc_change_employ_highest <- perc_change_employ %>% 
+  tail(5) %>% 
+  select(1,2)
+
+perc_change_employ_result <- bind_rows(perc_change_employ_lowest, perc_change_employ_highest)
+
+perc_change_employ_result
+```
+
+The results here shows that the top 5 fields that is most valuable in terms of having the lowest unemployment rate with a graduate degree compared to an undergraduate degree include the interdisciplinary fields, Health, and Biology/Life Sciences with ranges that are 52 to 71% lower in rates for participants who graduated from these graduate programs. This could indicate that having a graduate degrees within these fields could signify less struggles in finding a job and having more job security. On the other hand, the fields with highest unemployment rates when comparing graduate to undergraduate degree holders include Computers and Mathematics, Engineering, and Industrial Arts/Consumer Services. These high percentage changes range from %39 lower to 39% higher which is a lot of variability within the range. 
+
+
+NOTE: The range for the highest unemployment rates are quite large and there's a big jump from the second-highest (Business) to the highest (Industrial Arts and Consumer Services) unemployment rates going from 29% lower to alomst 40% higher for graduate degree holders. It would be interesting for future analyses to investigate further into what is causing this large increase in percent change particularly for the field of the Industrial Arts and Consumer Services as it is th only major category that has a increased percentage in unemployment rates and it is quite a large increase as well.
+
+### What Particular Majors within the Highest and Lowest Percent Changes in Median Income Should We Look Out For the Most?
+
+Now that we know which fields generally have the lowest and highest percent changes in median income depending on the graduate and undergraduate holders, we can now use this information to find out which particular subfields, within those major categories, have the most and least value for graduate degree holders financially. 
+
+#### ** Resulting Table for 5 Highest Percent Changes in Median Incomes By Major/Sub-field **
+
+The top 5 highest percent changes in median incomes are calculated in the same way as the other calculations. The difference here is that we had to first combine datasets that have the employment and income data along with the general major categories and majors/sub-fields data. From there, we filtered major categories from the combined dataset (adj_undergrad_grad) with the major categories from the perc_change_median_result dataset. This was done so that we could access the majors within the categories that were in the opposite extremes in terms of income.   
+
+
+```{r}
+
+adj_grad_students <- grad_students %>%
+  arrange(Major) %>% 
+  select(Major, Major_category, Grad_unemployment_rate, Grad_median)
+
+adj_recent_grads <- recent_grads %>% 
+  arrange(Major) %>% 
+  select(Unemployment_rate, Median)
+
+adj_undergrad_grad <- cbind(adj_grad_students, adj_recent_grads)
+
+adj_undergrad_grad <- adj_undergrad_grad %>% 
+  rename("Undergrad_unemployment_rate" = "Unemployment_rate",
+         "Undergrad_median" = "Median")
+
+highest_median_perc_change <- perc_change_median_highest$Major_category
+
+highest_median_majors <- adj_undergrad_grad %>%
+  filter(Major_category %in% highest_median_perc_change) %>% 
+  select(-Major_category)
+
+  
+highest_median_majors  <- highest_median_majors %>% 
+  mutate(Median_Diff = Grad_median - Undergrad_median) %>% 
+  mutate(Percent_Change_Median = 100 * (Median_Diff / Undergrad_median)) %>% 
+  select(Major, Percent_Change_Median) %>% 
+  arrange(desc(Percent_Change_Median)) %>% 
+  head(5)
+
+highest_median_majors
+```
+
+Surprisingly, the sub field of Zoology (from the major category of Biology and Life Sciences) seem to have the largest percent change increase for median income with 323% increase for graduate-degree holders compared to undergrad. Some other interesting findings includes Clinical Psychology which is the only sub field that is out of the major categories of Biology and Health with exactly 180% increase in median income for individuals who have a graduate degree. 
+
+
+#### ** Resulting Table for 5 Lowest Percent Changes in Median Incomes By Major/Sub-field **
+
+The following sub fields of lowest differences in median incomes percent-wise between graduate and undergraduate-degree holders:
+
+```{r}
+
+
+lowest_median_perc_change <- perc_change_median_lowest$Major_category
+
+lowest_median_majors <- adj_undergrad_grad %>%
+  filter(Major_category %in% lowest_median_perc_change) %>% 
+  select(-Major_category)
+
+  
+lowest_median_majors  <- lowest_median_majors %>% 
+  mutate(Median_Diff = Grad_median - Undergrad_median) %>% 
+  mutate(Percent_Change_Median = 100 * (Median_Diff / Undergrad_median)) %>% 
+  select(Major, Percent_Change_Median) %>% 
+  arrange(Percent_Change_Median) %>% 
+  head(5)
+
+lowest_median_majors
+
+```
+
+Some insightful observations in these results is 3 out of the 5 sub fields with lowest median income difference involve engineering, a very STEM-heavy field, one of which is the second-lowest of all with only a 12.7% percent change increase. The results for these particular specialties in engineering may suggest that there's not as much as of a benefit to pursue a graduate degree if you want a higher income. 
+
+### What Particular Majors within the Lowest and Highest Percent Changes in Unemployment Rate Should We Look Out For the Most?
+
+#### ** Resulting Table for 5 Lowest Percent Changes in Unemployment Rates By Major/Sub-field **
+
+
+```{r}
+
+lowest_employ_perc_change <- perc_change_employ_lowest$Major_category
+
+
+lowest_employ_majors <- adj_undergrad_grad %>%
+  filter(Major_category %in% lowest_employ_perc_change) %>% 
+  select(-Major_category)
+
+  
+lowest_employ_majors  <- lowest_employ_majors %>% 
+  mutate(Employ_Diff = Grad_unemployment_rate - round(Undergrad_unemployment_rate, 5)) %>% 
+  mutate(Percent_Change_Unemployment = 100 * (Employ_Diff / Undergrad_unemployment_rate)) %>% 
+  select(Major, Percent_Change_Unemployment) %>% 
+  arrange(Percent_Change_Unemployment) %>% 
+  head(5)
+
+lowest_employ_majors
+
+```
+
+What seems to be interesting here is that two lowest percent changes in unemployment rates (100% and 75.68% lower) are in Court Reporting and Public Policy which both are in the same major category of Law & Policy, indicating that graduate-degree holders in this area of study are highly valued to the point where it's not as difficult for individuals in these sub fields to find work and secure a job. 
+
+
+#### ** Resulting Table for 5 Highest Percent Changes in Unemployment Rates By Major/Sub-field **
+
+NOTE: Had to change two of the values within the dataset (Undergrad_unemployment_rate for the Mathematics and Computer Science as well as Military Technologies) from 0.000000000 to 0.000000001 in order for the percent change to be calculated since undergraduate unemployment rate counts as part of the denominator within the calculation. The "Inf" value most likely arose because percent change cannot be calculated when there's a zero within the denominator (would be considered undefined)
+
+```{r}
+
+highest_employ_perc_change <- perc_change_employ_highest$Major_category
+
+adj_undergrad_grad[107, 5] <- 0.000000001
+adj_undergrad_grad[115, 5] <- 0.000000001
+
+highest_employ_majors <- adj_undergrad_grad %>%
+  filter(Major_category %in% highest_employ_perc_change) %>% 
+  select(-Major_category)
+
+  
+highest_employ_majors  <- highest_employ_majors %>% 
+  mutate(Employ_Diff = Grad_unemployment_rate - round(Undergrad_unemployment_rate, 5)) %>% 
+  mutate(Percent_Change_Unemployment = 100 * (Employ_Diff / Undergrad_unemployment_rate)) %>% 
+  select(Major, Percent_Change_Unemployment) %>% 
+  arrange(desc(Percent_Change_Unemployment)) %>% 
+  head(5)
+
+highest_employ_majors
+```
+
+### Results 
+
+**Question:** What job industries seem to value graduate degrees more compared to non-graduate degrees based on average median income and unemployment rate?
+
+**Answer:** Based on the analyses, it does seems like there is a good balance of STEM-heavy fields, such as Biology/Life Sciences, Health, and Physical Sciences, and non-STEM fields, such as Humanities and Psychology, that value graduate-degree holders the most compared to only undergraduate-degree holders based on the percent change in average median income. Similarly, average unemployment rates are lowest for Biology/Life Sciences, Health, and interdisciplinary fields. Two fields that are part of the highest percent change in median income and lowest percent change in unemployment rate are Biology & Life Science and Health, meaning these two overall job industries seem to value individuals that have  graduate degrees more than those that just have their undergraduate. 
+
+**Sub-Question:** Within the major categories that have those opposite extremes in unemployment rate and average median income, which specific majors within those categories have the smallest and largest proportions in median income and unemployment rate? 
+
+**Answer:** The specific majors or subfields that have the highest proportions in unemployment rate as measured through percent change includes Mathematics and Computer Science, Military Technologies, and Engineering and Industrial Management, most of which are part of the Industrial Services and Engineering fields. This may mean that graduate-degree holders in these fields more difficulty in finding jobs within their respective fields than the undergrad counterparts. The subfields with lowest and thus ideal proportions in unemployment rates include Court Reporting, Public Policy, and General Health/Medical Services all of which are considered very valuable for graduate-degree holders as there is no decrease in need for healthcare professionals and professionals with the field of law and public policy. 
+
+For median incomes, the subfields that are found to be most valuable and thus profitable with a graduate degree includes Biology, Clinical Psychology, and Zoology while the subfields with the least value for graduate-degree holders, in terms of median income based percent change, includes miscellaneous fine arts and three particular specialties in engineering (i.e. petroleum, mineral, metallurgical) that all have to do extracting/producing chemical and minerals. 
+
+### Extending the Analysis 
+
+Although this data set provides summary stats for multiple variables, it lacks learning about the individual data across the survey participants (2). Income and Unemployment rates often differs withing genders. The data wrangling omits learning about where and who the data comes from while computing the average across variables. Gender was only summarized within recent under-graduate, the data lacks providing gender stats within graduate students. 
+
+### Do women in STEM majors receive less compensation than men?
+
+We will explore which majors have the most amount of women in them. In doing so, we will be able to plot out a scatter plot comparing median income and percentage of women. Finding a negative correlation between these two variables would mean that women are getting paid less than men in STEM majors.
+
+But first, we wanted to see which majors are the most female-dominated and which are the most male-dominated.
+
+```{r}
+#Use arrange() to sort share_women
+
+women_stem_share_top<- women_stem |>
+  arrange(desc(ShareWomen))
+women_stem_share_bottom <- women_stem |>
+  arrange(ShareWomen)
+
+#show TOP 5
+women_stem_share_top |>
+  head(5) |>
+  select(Major, Major_category, Total, ShareWomen, Median)
+
+#show BOTTOM 5
+women_stem_share_bottom |>
+  head(5) |>
+  select(Major, Major_category, Total, ShareWomen, Median)
+
+```
+
+As we did in our data analysis, here we can see the top 5 and the bottom 5 majors in terms of the percentage of women in that major. 
+
+It seems like most women gravitate towards majors under the Health category and men go towards the Engineering category majors.
+
+```{r, warning=FALSE}
+#plot Median vs ShareWomen
+p <- women_stem |>
+  ggplot(aes(x = ShareWomen, y = Median, color = Major_category)) 
+
+p + geom_point() +
+  labs(title = "Median Income by Women's share in the Major Category", x = "Percentage of Women", y = "Median Income", color = "Major Category") +
+  scale_y_continuous(labels = comma) +
+  scale_x_continuous(label = c("0%", "25%" ,"50%", "75%", "100%")) +
+  stat_smooth(method = "lm", col = "red")
+  
+```
+The least squares regression line shows a downward trend when the percentage of women increases for a particular major. 
+
+```{r}
+lmodel <- linear_reg() |>
+  set_engine("lm") |>
+  fit(Median ~ ShareWomen, data = women_stem)
+
+#use tidy() to display linear model values.
+lmodel |>
+  tidy()
+```
+The linear model doesn't tell us much as the x-axis is described with percentages. To mitigate this problem, we will interpret the result based on the r squared value.
+
+```{r}
+#use glance() to retrieve the r squared value.
+lmodel |>
+  glance()
+```
+
+Almost 34 percent of variation can be explained by the relationship between median income and the percentage of women in the major.
+
+It is a relatively weak correlation, but there seems to be somewhat of a negative relationship between these two variables.
+
+If this is the case, it begs this question:
+
+###Is unemployment rate higher for majors with more women, thus leading to a decreasing median income?
+
+```{r, warning=FALSE}
+#Create new data set with the same major_categories, but with unemployment rates
+women_stem_unemployment <- recent_grads |>
+  select(Major, Major_category, ShareWomen, Unemployment_rate)|>
+  filter(Major_category %in% women_stem$Major_category) #copy stem majors from women_stem
+
+p <- women_stem_unemployment |>
+  ggplot(aes(x = ShareWomen, y = Unemployment_rate, color = Major_category)) 
+
+p + geom_point() +
+  labs(title = "Unemployment by Women's share in the Major Category", x = "Percentage of Women", y = "Unemployment Rate", color = "Major Category") +
+  scale_y_continuous(labels =c("0%", "5%", "10%", "15%", "20%")) +
+  scale_x_continuous(label = c("0%", "25%" ,"50%", "75%", "100%")) +
+  stat_smooth(method = "lm", col = "red")
+  
+```
+Looking at least squares regression, it doesn't seem like the percentage of women has barely any observable effect on the Unemployment rate, since the slope is almost 0. 
+
+```{r}
+linear_reg() |>
+  set_engine("lm") |>
+  fit(Unemployment_rate ~ ShareWomen, data = women_stem_unemployment)|>
+  glance()
+```
+
+There is basically little to no correlation between the percentage of women and unemployment rate when interpreting the r.squared value of 0.000012. 
+
+Since there seems to be no correlation between these two variables in the STEM majors, we were curious to see if the same is true for the non-STEM majors.
+
+```{r, warning=FALSE}
+#Create new dataset with non-stem majors.
+women_nostem_unemployment <- recent_grads |>
+  select(Major, Major_category, ShareWomen, Unemployment_rate)|>
+  filter(!(Major_category %in% women_stem$Major_category)) #omit stem majors from women_stem
+
+p <- women_nostem_unemployment |>
+  ggplot(aes(x = ShareWomen, y = Unemployment_rate, color = Major_category)) 
+
+p + geom_point() +
+  labs(title = "Unemployment by Women's share in the Major Category", x = "Percentage of Women", y = "Unemployment Rate", color = "Major Category") +
+  scale_y_continuous(labels = comma) +
+  scale_x_continuous(label = c("0%", "25%" ,"50%", "75%", "100%")) +
+  stat_smooth(method = "lm", col = "red")
+```
+
+The least squares regression line seems to have a slight upward trend. Let us check the r squared value for more information. 
+
+```{r}
+linear_reg() |>
+  set_engine("lm") |>
+  fit(Unemployment_rate ~ ShareWomen, data = women_nostem_unemployment)|>
+  glance()
+```
+
+An r.squared value of 0.0059 means only 0.0059 percent of variations can be attributed to the correlation between unemployment rate and percentage of women in the major. 
+
+The percentage of women in a particular major doesn't seem like a good predictor for the unemployment rate for that major. Which means women are not getting paid less because more of them are unemployed. 
+
+## Conclusion
+
+As graduate school has become more popular throughout the years, the return investment does matter based on your major. The data out study uses was from 2010 to 2012 Public Use Census data (2), although the questions we asked and answered represent stats from that period. As demand and supply changes by the year, A major chosen in 2010 can have a different return investment when comparing it to 2020 and beyond. 
+
+Job industries are ever evolving therefore the opportunity to return to a graduate school to better develop your skill set is always in the interest of a company, but our study will provide a little more information as a return investment if that value exists for particular individual in a field.
+
+## References
+
+(1) Hanson, Melanie. “Average Graduate Student Loan Debt [2021]: For Master's & Phd.” Education Data Initiative, 3 Dec. 2021, https://educationdata.org/average-graduate-student-loan-debt. 
+
+(2) Bureau, US Census. “Public Use Microdata Sample (PUMS).” Census.gov, 23 Nov. 2021, https://www.census.gov/programs-surveys/acs/microdata.html. 
+
+
